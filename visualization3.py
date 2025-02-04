@@ -14,6 +14,10 @@ print("Labevents columns:", labevents.columns.tolist())
 print("D_labitems columns:", d_labitems.columns.tolist())
 print("Admissions columns:", admissions.columns.tolist())
 
+# Print labevents flag
+print("Labevents flag:", labevents["FLAG"])
+
+
 # Get the top 10 most frequent lab tests
 print("Getting top 10 most frequent lab tests...")
 lab_counts = labevents["ITEMID"].value_counts()
@@ -31,35 +35,19 @@ lab_values = lab_values.merge(
     admissions[["HADM_ID", "HOSPITAL_EXPIRE_FLAG"]], on="HADM_ID", how="left"
 )
 
-# Calculate normal ranges and abnormalities for each lab test
-print("Calculating normal ranges and abnormalities for each lab test...")
+# Calculate abnormalities based on lab FLAGS...
+print("Calculating abnormalities based on lab FLAGS...")
 abnormal_stats = {}
 labs_list = []
 for lab_id in lab_ids:
-
     lab_data = lab_values[lab_values["ITEMID"] == lab_id]
     lab_name = top_labs[top_labs["ITEMID"] == lab_id]["LABEL"].iloc[0]
 
-    if len(lab_data) == 0 or "VALUENUM" not in lab_data.columns:
-        continue
-
-    # Remove null values and extreme outliers
+    # Remove null values for VALUENUM
     lab_data = lab_data[lab_data["VALUENUM"].notna()]
-    if len(lab_data) == 0:
-        continue
 
-    # Calculate normal range using percentiles
-    # Using 5th and 95th percentiles to define normal range
-    lower_bound = max(0, lab_data["VALUENUM"].quantile(0.05))
-    upper_bound = lab_data["VALUENUM"].quantile(0.95)
-
-    # Identify abnormal values
-    abnormal = lab_data[
-        (lab_data["VALUENUM"] < lower_bound) | (lab_data["VALUENUM"] > upper_bound)
-    ]
-
-    if len(abnormal) == 0:
-        continue
+    # Identify abnormal values using FLAG column
+    abnormal = lab_data[lab_data["FLAG"].notna()]
 
     # Calculate mortality rate for abnormal values
     mortality_rate = (abnormal["HOSPITAL_EXPIRE_FLAG"] == 1).mean() * 100
@@ -67,10 +55,9 @@ for lab_id in lab_ids:
     # Store results
     abnormal_stats[lab_name] = {
         "mortality_rate": mortality_rate,
-        "lower_bound": lower_bound,
-        "upper_bound": upper_bound,
         "n_abnormal": len(abnormal),
         "n_total": len(lab_data),
+        "percent_abnormal": (len(abnormal) / len(lab_data)) * 100,
     }
     labs_list.append(lab_name)
 
@@ -92,15 +79,8 @@ for i, lab1 in enumerate(labs_list):
         lab2_data = lab_values[lab_values["LABEL"] == lab2]
 
         # Get common hospital admissions with abnormal values in both tests
-        abnormal1_hadm = lab1_data[
-            (lab1_data["VALUENUM"] < abnormal_stats[lab1]["lower_bound"])
-            | (lab1_data["VALUENUM"] > abnormal_stats[lab1]["upper_bound"])
-        ]["HADM_ID"]
-
-        abnormal2_hadm = lab2_data[
-            (lab2_data["VALUENUM"] < abnormal_stats[lab2]["lower_bound"])
-            | (lab2_data["VALUENUM"] > abnormal_stats[lab2]["upper_bound"])
-        ]["HADM_ID"]
+        abnormal1_hadm = lab1_data[lab1_data["FLAG"].notna()]["HADM_ID"]
+        abnormal2_hadm = lab2_data[lab2_data["FLAG"].notna()]["HADM_ID"]
 
         common_hadm = set(abnormal1_hadm) & set(abnormal2_hadm)
 
@@ -134,7 +114,7 @@ sns.heatmap(
 
 # Labels
 plt.title(
-    "Mortality Rates (%) for Abnormal Lab Value Combinations\n(Based on 5th-95th Percentile Ranges)"
+    "Mortality Rates (%) for Abnormal Lab Value Combinations\n(Based on Laboratory FLAG Values)"
 )
 plt.xticks(rotation=45, ha="right")
 plt.yticks(rotation=0)
